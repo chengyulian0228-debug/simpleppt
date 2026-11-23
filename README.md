@@ -43,7 +43,7 @@ node scripts/serve-static.mjs
 
 ## GitHub Pages 发布
 
-1. 新建一个空的公开仓库（建议名称 `simpleppt`）。上传本发布包的源码，不要上传个人课件、历史或开发缓存。
+1. 新建一个空的公开仓库（建议名称 `simpleppt`），把本仓库推送上去。`.gitignore` 已排除 `node_modules/`、`dist/` 和 `.local-data/`；不要提交个人课件或历史讲义。
 2. 仓库 Settings → Pages → Build and deployment → Source 选择 **GitHub Actions**。
 3. 推送到 `main` 后，`.github/workflows/pages.yml` 会安装依赖、测试、构建并发布。
 4. 等待 Actions 成功，打开该部署显示的地址，通常为 `https://用户名.github.io/simpleppt/`。
@@ -54,4 +54,4 @@ node scripts/serve-static.mjs
 
 Noto Sans SC 来自 [noto-cjk](https://github.com/notofonts/noto-cjk)，采用 SIL Open Font License 1.1，见 `public/fonts/OFL.txt`。PDF.js、pdf-lib、fontkit、React、Vite、Lucide 等依赖遵循各自许可证；构建资源附带对应许可证。网站不使用远程字体、分析统计、第三方上传接口或远程推理 API。模型采用 Xenova/clip-vit-base-patch32（MIT），固定修订 6b7c523703ae26e39be4b03774966f8571c7f523；Transformers.js 遵循 Apache-2.0，ONNX Runtime 遵循 MIT。模型只做零样本图片类型分类，其分数并非知识关联的准确概率。下载源可获取常规网络请求信息，但不会接收课件。模型缓存与讲义历史分开，清空讲义历史不会清空模型缓存。
 
-`backend/`、`serve.py` 和 Python 测试属于旧本机版，仅留在原工作区作参考，不进入静态发布包。
+旧本机版（Python `backend/`、`serve.py` 及其测试）已移除，原件见 Git 首次提交。
