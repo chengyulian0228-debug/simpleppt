@@ -7,7 +7,7 @@ import { clean, fingerprint, headingRank, selectPages, Structure, type Run, type
 import type { Options, Job, SavedImageReview } from './types';
 import { questionPageText } from './question-tools';
 import { repeatedFooterSignatures, type FooterLine } from './footer-signatures';
-import { classifyImages, intersects, imageKey, type ImageRegion, type Box } from './image-policy';
+import { classifyImages, intersects, imageKey, isLowTextOverlayPage, type ImageRegion, type Box } from './image-policy';
 import { inspectVisual, closeVision } from './vision-client';
 import { visualVerdict } from './vision-policy';
 
@@ -307,7 +307,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
       if (d.image.visual) review.reason += ` · ${visualVerdict(d.image.visual).label}`;
     }
     const omittedFor = (number: number) => new Set((imageDecisions.get(number) || []).filter(d => d.remove).map(d => d.image.operation));
-    const removedImages = [...imageDecisions.values()].flat().filter(d => d.remove).length;
+    let removedImages = [...imageDecisions.values()].flat().filter(d => d.remove).length;
     const bytes = await fontBytes(); check();
     const out = await PDFDocument.create(); out.registerFontkit(fontkit);
     const font = await out.embedFont(bytes, { subset: false });
@@ -320,6 +320,15 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
     for (const [i, p] of extracted.entries()) {
       check(); report(Math.round(48 + 31 * i / extracted.length), 'organizing', `正在衔接第 ${i + 1} / ${selected.length} 页正文`);
       const keptImages = (imageDecisions.get(p.number) || []).filter(d => !d.remove).map(d => d.image);
+      const manuallyKept = keptImages.some(img => options.imageOverrides?.[imageKey(p.number, img.operation)] === false);
+      if (!manuallyKept && isLowTextOverlayPage(p, keptImages)) {
+        removedImages += keptImages.length;
+        for (const img of keptImages) {
+          const review = images.find(item => item.id === imageKey(p.number, img.operation));
+          if (review) { review.removed = true; review.locked = false; review.reason = '图文叠加且正文较少，已跳过此页'; }
+        }
+        (await pdf.getPage(p.number)).cleanup(); await pause(); continue;
+      }
       // Independent images are cropped and inserted among searchable text. Keep connected/overlaid diagrams intact.
       const raster = p.complex || keptImages.some(image => p.rows.some(row => intersects(image, row)))
         || keptImages.some((image, index) => keptImages.slice(index + 1).some(other => intersects(image, other)))

@@ -8,7 +8,14 @@ export const imageKey = (page: number, operation: number) => `${page}:${operatio
 export const intersects = (a: Box, b: Box) => Math.min(a.right, b.right) - Math.max(a.x, b.x) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
 const area = (b: Box) => Math.max(0, b.right - b.x) * Math.max(0, b.bottom - b.top);
 const gap = (a: Box, b: Box) => Math.hypot(Math.max(0, a.x - b.right, b.x - a.right), Math.max(0, a.top - b.bottom, b.top - a.bottom));
-const teaching = /(?:图\s*[0-9一二三四五六七八九十]|表\s*[0-9一二三四五六七八九十]|如图|下图|上图|示意|流程图|结构图|关系图|坐标|曲线|电路|实验|显微|影像|病例|题图|看图|读图|识图|二维码的|二维码结构|编码原理|figure\s*\d|diagram|chart)/i;
+const teaching = /(?:图\s*[0-9一二三四五六七八九十]|表\s*[0-9一二三四五六七八九十]|如图|下图|上图|示意|流程图|流程|结构图|结构|框架|纲要|表格|对比|比较|关系图|坐标|曲线|电路|实验|显微|影像|病例|题图|看图|读图|识图|二维码的|二维码结构|编码原理|figure\s*\d|diagram|chart)/i;
+export function isLowTextOverlayPage(page: ImagePage, keptImages: ImageRegion[]): boolean {
+  if (!keptImages.length || keptImages.some(image => image.mask)) return false;
+  if (!keptImages.some(image => page.rows.some(row => intersects(image, row)))) return false;
+  const text = page.rows.map(r => r.text).join('').replace(/\s+/g, '');
+  if (!text.length || text.length >= 30) return false;
+  return !teaching.test(text);
+}
 const promotion = /(?:扫码(?:关注|添加|咨询|领取|加群)|扫描.{0,8}(?:关注|领取|加群)|关注.{0,8}(?:公众号|视频号)|添加.{0,6}(?:微信|老师)|微信(?:号|咨询)|课程咨询|商务合作|领取资料|加入.{0,4}群|公众号[：:]|版权所有|\bcopyright\b|[©®™])/i;
 function samePicture(a: ImageRegion, b: ImageRegion) {
   if (!a.sample || !b.sample || a.sample.length !== b.sample.length) return false;
