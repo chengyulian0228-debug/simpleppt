@@ -9,7 +9,7 @@ const jobs = new Map<string, SavedJob>(), controllers = new Map<string, AbortCon
 const urls = new Map<string, string>();
 function db() {
   database ||= new Promise((resolve, reject) => {
-    const request = indexedDB.open('yejian-browser-v1', 1);
+    const request = indexedDB.open('simpleppt-browser-v1', 1);
     request.onupgradeneeded = () => { request.result.createObjectStore('documents', { keyPath: 'id' }); request.result.createObjectStore('jobs', { keyPath: 'id' }); };
     request.onsuccess = () => resolve(request.result);
     request.onerror = () => { database = undefined; reject(new Error('浏览器本地存储不可用，请退出隐私模式后重试。')); };

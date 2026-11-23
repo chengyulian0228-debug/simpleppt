@@ -7,9 +7,9 @@ const mime = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript', '.
 http.createServer(async (req, res) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') { res.writeHead(405); res.end(); return; }
   let name = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
-  if (name === '/') { res.writeHead(302, { Location: '/yejian/' }); res.end(); return; }
-  if (!name.startsWith('/yejian/')) { res.writeHead(404); res.end(); return; }
-  name = name.slice('/yejian/'.length) || 'index.html';
+  if (name === '/') { res.writeHead(302, { Location: '/simpleppt/' }); res.end(); return; }
+  if (!name.startsWith('/simpleppt/')) { res.writeHead(404); res.end(); return; }
+  name = name.slice('/simpleppt/'.length) || 'index.html';
   const file = path.resolve(root, name);
   if (!file.startsWith(root + path.sep)) { res.writeHead(403); res.end(); return; }
   try {
@@ -18,4 +18,4 @@ http.createServer(async (req, res) => {
     res.end(req.method === 'HEAD' ? undefined : await readFile(file));
     console.log(req.method, name);
   } catch { res.writeHead(404); res.end('Not found'); }
-}).listen(4173, '127.0.0.1', () => console.log('Static preview: http://127.0.0.1:4173/yejian/'));
+}).listen(4173, '127.0.0.1', () => console.log('Static preview: http://127.0.0.1:4173/simpleppt/'));

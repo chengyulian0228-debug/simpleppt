@@ -1,4 +1,4 @@
-# simpleppt
+# simple ppt
 
 把重复标题的 PDF 课件整理为连续复习讲义。暖白与暗红配色，支持电脑、平板和手机。
 
@@ -39,14 +39,14 @@ npm run build
 node scripts/serve-static.mjs
 ```
 
-最后一个命令只提供 `dist`，并在 `http://127.0.0.1:4173/yejian/` 模拟 GitHub Pages 的项目子路径。公开网站不需要 Python。
+最后一个命令只提供 `dist`，并在 `http://127.0.0.1:4173/simpleppt/` 模拟 GitHub Pages 的项目子路径。公开网站不需要 Python。
 
 ## GitHub Pages 发布
 
-1. 新建一个空的公开仓库（建议名称 `yejian`）。上传本发布包的源码，不要上传个人课件、历史或开发缓存。
+1. 新建一个空的公开仓库（建议名称 `simpleppt`）。上传本发布包的源码，不要上传个人课件、历史或开发缓存。
 2. 仓库 Settings → Pages → Build and deployment → Source 选择 **GitHub Actions**。
 3. 推送到 `main` 后，`.github/workflows/pages.yml` 会安装依赖、测试、构建并发布。
-4. 等待 Actions 成功，打开该部署显示的地址，通常为 `https://用户名.github.io/yejian/`。
+4. 等待 Actions 成功，打开该部署显示的地址，通常为 `https://用户名.github.io/simpleppt/`。
 
 配置使用相对资源地址，支持任意仓库名称。GitHub 免费账号通常需使用公开仓库发布 Pages；仓库中仅包含网站代码及开源字体。访客的课件不会进入仓库。
 

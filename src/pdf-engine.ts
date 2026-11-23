@@ -497,7 +497,7 @@ async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: st
     outline.set(PDFName.of('First'), refs[0]); outline.set(PDFName.of('Last'), refs.at(-1)!); outline.set(PDFName.of('Count'), out.context.obj(refs.length));
     out.catalog.set(PDFName.of('Outlines'), outlineRef);
   }
-  out.setTitle(safe(title) + ' · 复习讲义'); out.setCreator('simpleppt · 浏览器本地整理'); out.setProducer('simpleppt / pdf-lib'); out.catalog.set(PDFName.of('Lang'), PDFString.of('zh-CN'));
+  out.setTitle(safe(title) + ' · 复习讲义'); out.setCreator('simple ppt · 浏览器本地整理'); out.setProducer('simpleppt / pdf-lib'); out.catalog.set(PDFName.of('Lang'), PDFString.of('zh-CN'));
 }
 
 export async function examplePdf(): Promise<File> {
