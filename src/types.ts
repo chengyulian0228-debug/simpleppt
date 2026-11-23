@@ -1,0 +1,5 @@
+export type DocumentInfo = { id: string; name: string; size: number; pageCount: number; previewUrl: string };
+export type Options = { layout: string; background: string; sourceMode: string; pages: string; imageMode?: 'smart' | 'basic'; modelHost?: 'mirror' | 'official'; imageOverrides?: Record<string, boolean> };
+export type ImageReview = { id: string; page: number; previewUrl: string; removed: boolean; reason: string; locked?: boolean };
+export type SavedImageReview = Omit<ImageReview, 'previewUrl'> & { thumbnail: Blob };
+export type Job = { id: string; documentId: string; documentName: string; status: string; stage: string; progress: number; message: string; error?: string; createdAt: number; options: Options; downloadUrl?: string; images?: ImageReview[]; stats?: { source_pages: number; result_pages: number; removed_headings: number; removed_paragraphs: number; image_pages: number; preserved_images: number; removed_images?: number; visual_images?: number; removed_signatures?: number } };

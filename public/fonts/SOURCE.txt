@@ -1,0 +1,5 @@
+Noto Sans SC, SIL Open Font License 1.1 (see OFL.txt).
+Source: https://github.com/notofonts/noto-cjk
+Original: Sans/Variable/TTF/Subset/NotoSansSC-VF.ttf
+This static TrueType instance was generated at wght=400 using fontTools 4.68.0.
+The font is bundled locally; no third-party font requests are needed.
