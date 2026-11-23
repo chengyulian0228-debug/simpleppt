@@ -516,6 +516,28 @@ async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: st
   out.setTitle(safe(title) + ' · 复习讲义'); out.setCreator('simple ppt · 浏览器本地整理'); out.setProducer('simpleppt / pdf-lib'); out.catalog.set(PDFName.of('Lang'), PDFString.of('zh-CN'));
 }
 
+export function sortFilesByName<T extends { name: string }>(files: T[]): T[] {
+  return [...files].sort((a, b) => a.name.localeCompare(b.name, 'zh-CN', { numeric: true, sensitivity: 'base' }));
+}
+
+export async function mergePdfFiles(files: File[], progress?: (value: number) => void): Promise<File> {
+  if (files.length === 1) return files[0];
+  const merged = await PDFDocument.create();
+  for (let i = 0; i < files.length; i++) {
+    progress?.(Math.round((i / files.length) * 85));
+    const bytes = await files[i].arrayBuffer();
+    const src = await PDFDocument.load(bytes, { ignoreEncryption: true });
+    const copied = await merged.copyPages(src, src.getPageIndices());
+    for (const page of copied) merged.addPage(page);
+    await pause();
+  }
+  progress?.(92);
+  const out = await merged.save();
+  progress?.(100);
+  const firstBase = files[0].name.replace(/\.pdf$/i, '').slice(0, 40);
+  return new File([out as Uint8Array<ArrayBuffer>], `${firstBase}_等${files.length}份合并.pdf`, { type: 'application/pdf' });
+}
+
 export async function examplePdf(): Promise<File> {
   const pdf = await PDFDocument.create(); pdf.registerFontkit(fontkit);
   const font = await pdf.embedFont(await fontBytes(), { subset: false });

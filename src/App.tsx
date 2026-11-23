@@ -1,9 +1,11 @@
 import { useEffect, useRef, useState } from 'react';
-import { ArrowDownToLine, ArrowRight, ArrowUpRight, BookOpen, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCopy, Clock3, FileText, FileUp, FolderOpen, LayoutTemplate, LoaderCircle, LockKeyhole, PanelLeft, ScanLine, SlidersHorizontal, Sparkles, Upload, X } from 'lucide-react';
+import { ArrowDown, ArrowDownToLine, ArrowRight, ArrowUp, ArrowUpRight, BookOpen, Check, CheckCheck, ChevronDown, ChevronLeft, ChevronRight, CircleHelp, ClipboardCopy, Clock3, FileText, FileUp, FolderOpen, LayoutTemplate, LoaderCircle, LockKeyhole, PanelLeft, Plus, ScanLine, SlidersHorizontal, Sparkles, Upload, X } from 'lucide-react';
 import type { DocumentInfo, Options, Job } from './types';
 import { localApi as api, importDocument, previewPage, clearHistory } from './local-store';
+import { mergePdfFiles, sortFilesByName } from './pdf-engine';
 import QuestionHelper from './QuestionHelper';
 import ImageReview from './ImageReview';
+const MAX_UPLOAD_BYTES = 300 * 1024 * 1024;
 const defaults: Options = { layout: 'balanced', background: 'source-frame', sourceMode: 'none', pages: '', imageMode: 'basic', modelHost: 'mirror' };
 const layouts = [{ id: 'balanced', name: '均衡阅读', detail: '舒适字号，适度留白' }, { id: 'compact', name: '紧凑复习', detail: '内容更集中，少翻几页' }, { id: 'notes', name: '留白批注', detail: '右侧留出手写空间' }];
 const backgrounds = [{ id: 'source-frame', name: '保留主风格', detail: '沿用主色，精简装饰' }, { id: 'text-only', name: '纯净正文', detail: '专注文字，去掉装饰' }];
@@ -55,6 +57,7 @@ function Preview({ job, onClose, onQuestions, onImages }: { job: Job; onClose: (
 function App() {
   const [view, setView] = useState<'work' | 'history'>('work');
   const [document, setDocument] = useState<DocumentInfo | null>(null);
+  const [queue, setQueue] = useState<File[]>([]);
   const [options, setOptions] = useState<Options>(defaults);
   const [partial, setPartial] = useState(false);
   const [advanced, setAdvanced] = useState(false);
@@ -94,32 +97,75 @@ function App() {
     return () => { stopped = true; clearTimeout(timer); };
   }, [job?.id, active]);
 
-  const upload = async (file: File) => {
+  const uploadFiles = async (incoming: FileList | File[], append = false) => {
     if (busy) return;
-    if (!file.name.toLowerCase().endsWith('.pdf')) return setToast('目前支持 PDF，请先将课件导出为 PDF。');
-    if (file.size > 100 * 1024 * 1024 || file.size === 0) return setToast('请选择 100 MB 以内、内容不为空的 PDF。');
-    setUploading(true); setUploadProgress(0); setJob(null);
-    try {
-      const result = await importDocument(file, setUploadProgress);
-      setDocument(result); setPartial(false); setOptions(o => ({ ...o, pages: '', imageOverrides: undefined }));
-    } catch (error) { setToast(error instanceof Error ? error.message : '文件读取失败，请重试。'); }
-    finally { setUploading(false); }
+    const list = Array.from(incoming);
+    if (!list.length) return;
+    const invalid = list.find(f => !f.name.toLowerCase().endsWith('.pdf'));
+    if (invalid) return setToast('目前支持 PDF，请先将课件导出为 PDF。');
+    if (list.some(f => f.size === 0)) return setToast('不能选择内容为空的 PDF。');
+    const nextQueue = append && queue.length ? [...queue, ...list] : sortFilesByName(list);
+    const totalBytes = nextQueue.reduce((sum, f) => sum + f.size, 0);
+    if (totalBytes > MAX_UPLOAD_BYTES) return setToast('单个或多个 PDF 总大小不能超过 300 MB。');
+    setJob(null); setPartial(false); setOptions(o => ({ ...o, pages: '', imageOverrides: undefined }));
+    if (nextQueue.length === 1) {
+      setQueue(nextQueue);
+      setUploading(true); setUploadProgress(0);
+      try { setDocument(await importDocument(nextQueue[0], setUploadProgress)); }
+      catch (error) { setQueue([]); setToast(error instanceof Error ? error.message : '文件读取失败，请重试。'); }
+      finally { setUploading(false); }
+    } else {
+      setDocument(null);
+      setQueue(nextQueue);
+    }
+  };
+
+  const moveQueued = (index: number, delta: -1 | 1) => {
+    if (busy) return;
+    const target = index + delta;
+    if (target < 0 || target >= queue.length) return;
+    const next = [...queue];
+    [next[index], next[target]] = [next[target], next[index]];
+    setQueue(next); setDocument(null); setJob(null);
+  };
+
+  const removeQueued = async (index: number) => {
+    if (busy) return;
+    const next = queue.filter((_, i) => i !== index);
+    setJob(null);
+    if (next.length === 0) { setQueue([]); setDocument(null); return; }
+    if (next.length === 1) {
+      setQueue(next); setUploading(true); setUploadProgress(0);
+      try { setDocument(await importDocument(next[0], setUploadProgress)); }
+      catch (error) { setQueue([]); setToast(error instanceof Error ? error.message : '文件读取失败，请重试。'); }
+      finally { setUploading(false); }
+    } else { setQueue(next); setDocument(null); }
   };
 
   const example = async () => {
     if (busy) return;
-    setUploading(true); setJob(null); setUploadProgress(0); setView('work');
+    setUploading(true); setJob(null); setUploadProgress(0); setView('work'); setQueue([]);
     try { setDocument(await api<DocumentInfo>('/example', { method: 'POST' })); setPartial(false); setOptions(o => ({ ...o, pages: '', imageOverrides: undefined })); }
     catch (error) { setToast(error instanceof Error ? error.message : '示例暂时无法打开'); }
     finally { setUploading(false); }
   };
 
   const start = async () => {
-    if (!document || busy) return;
+    if ((!document && queue.length === 0) || busy) return;
     if (partial && !options.pages.trim()) return setToast('请填写想整理的页码，如 5-10, 18。');
     setRequesting(true);
     try {
-      const result = await api<Job>('/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentId: document.id, options: { ...options, pages: partial ? options.pages : '' } }) });
+      let target = document;
+      if (!target && queue.length > 0) {
+        setUploading(true); setUploadProgress(0);
+        try {
+          const combined = queue.length > 1 ? await mergePdfFiles(queue, p => setUploadProgress(Math.round(p * .6))) : queue[0];
+          target = await importDocument(combined, p => setUploadProgress(60 + Math.round(p * .4)));
+          setDocument(target);
+        } finally { setUploading(false); }
+      }
+      if (!target) return;
+      const result = await api<Job>('/jobs', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ documentId: target.id, options: { ...options, pages: partial ? options.pages : '' } }) });
       setJob(result);
     } catch (error) { setToast(error instanceof Error ? error.message : '暂时无法开始整理'); }
     finally { setRequesting(false); }
@@ -162,9 +208,9 @@ function App() {
 
         <section className="workbench" aria-label="PDF 整理工作台">
           <div className="section-head"><span className="step">01</span><h2>放入你的课件</h2><span className="section-hint">从一份 PDF 开始</span></div>
-          <input ref={input} type="file" accept="application/pdf,.pdf" className="file-input" aria-label="选择 PDF 课件" onChange={e => { const file = e.target.files?.[0]; if (file) upload(file); e.target.value = ''; }} />
-          <div className={`dropzone ${dragging ? 'dragging' : ''} ${document ? 'has-file' : ''}`} onDragOver={e => { e.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length > 1) setToast('一次整理一份课件，请选择一个 PDF。'); else if (e.dataTransfer.files[0]) upload(e.dataTransfer.files[0]); }}>
-            {uploading ? <div className="upload-state"><LoaderCircle className="spin" size={27} /><h3>{uploadProgress ? '正在放入你的课件' : '正在读取课件'}</h3><p>{uploadProgress < 100 ? `${uploadProgress}%` : '正在检查文件，请稍等…'}</p><div className="upload-meter"><i style={{ width: `${uploadProgress}%` }} /></div></div> : document ? <div className="selected-document"><div className="document-thumbnail"><img src={document.previewUrl} alt="原课件首页" /></div><div className="document-details"><span className="file-label"><FileText size={13} />PDF 课件</span><h3>{document.name}</h3><p>{document.pageCount} 页<span>·</span>{sizeLabel(document.size)}<span>·</span><em><Check size={13} />已就绪</em></p><button className="text-button replace-file" onClick={() => input.current?.click()} disabled={busy}>换一份课件</button></div><button className="icon-button remove-document" aria-label="移除当前课件" disabled={busy} onClick={() => { setDocument(null); setJob(null); }}><X size={17} /></button></div> : <div className="upload-empty"><span className="upload-icon"><FileUp size={28} strokeWidth={1.4} /></span><h3>把 PDF 拖到这里</h3><p>或者选择设备里的课件文件</p><button className="button upload-button" onClick={() => input.current?.click()}><Upload size={15} />选择 PDF 文件</button><small>支持 PDF 格式，单个文件最大 100 MB</small></div>}
+          <input ref={input} type="file" multiple accept="application/pdf,.pdf" className="file-input" aria-label="选择 PDF 课件" onChange={e => { if (e.target.files?.length) void uploadFiles(e.target.files, queue.length > 0 && !completed); e.target.value = ''; }} />
+          <div className={`dropzone ${dragging ? 'dragging' : ''} ${document || queue.length > 0 ? 'has-file' : ''}`} onDragOver={e => { e.preventDefault(); if (!busy) setDragging(true); }} onDragLeave={() => setDragging(false)} onDrop={e => { e.preventDefault(); setDragging(false); if (e.dataTransfer.files.length) void uploadFiles(e.dataTransfer.files, queue.length > 0 && !completed); }}>
+            {uploading ? <div className="upload-state"><LoaderCircle className="spin" size={27} /><h3>{queue.length > 1 ? `正在合并 ${queue.length} 份课件` : uploadProgress ? '正在放入你的课件' : '正在读取课件'}</h3><p>{uploadProgress < 100 ? `${uploadProgress}%` : '正在检查文件，请稍等…'}</p><div className="upload-meter"><i style={{ width: `${uploadProgress}%` }} /></div></div> : queue.length > 1 ? <div className="merge-queue"><div className="merge-head"><div><span className="file-label"><FileText size={13} />合并 {queue.length} 份 PDF</span><small>总计 {sizeLabel(queue.reduce((s, f) => s + f.size, 0))} · 按顺序合并整理</small></div><div className="merge-head-actions"><button className="text-button" onClick={() => input.current?.click()} disabled={busy}><Plus size={14} />继续添加</button><button className="text-button" onClick={() => { setQueue([]); setDocument(null); setJob(null); }} disabled={busy}>清空</button></div></div><ul className="merge-list">{queue.map((f, idx) => <li key={`${f.name}-${f.size}-${idx}`}><span className="merge-index">{idx + 1}</span><span className="merge-name" title={f.name}>{f.name}</span><span className="merge-size">{sizeLabel(f.size)}</span><div className="merge-controls"><button className="icon-button" aria-label="上移" disabled={busy || idx === 0} onClick={() => moveQueued(idx, -1)}><ArrowUp size={14} /></button><button className="icon-button" aria-label="下移" disabled={busy || idx === queue.length - 1} onClick={() => moveQueued(idx, 1)}><ArrowDown size={14} /></button><button className="icon-button" aria-label="移除" disabled={busy} onClick={() => void removeQueued(idx)}><X size={14} /></button></div></li>)}</ul></div> : document ? <div className="selected-document"><div className="document-thumbnail"><img src={document.previewUrl} alt="原课件首页" /></div><div className="document-details"><span className="file-label"><FileText size={13} />PDF 课件</span><h3>{document.name}</h3><p>{document.pageCount} 页<span>·</span>{sizeLabel(document.size)}<span>·</span><em><Check size={13} />已就绪</em></p><div className="selected-actions"><button className="text-button replace-file" onClick={() => input.current?.click()} disabled={busy}><Plus size={13} />继续添加合并</button><button className="text-button replace-file" onClick={() => { setQueue([]); setDocument(null); setJob(null); setTimeout(() => input.current?.click(), 0); }} disabled={busy}>换一份课件</button></div></div><button className="icon-button remove-document" aria-label="移除当前课件" disabled={busy} onClick={() => { setQueue([]); setDocument(null); setJob(null); }}><X size={17} /></button></div> : <div className="upload-empty"><span className="upload-icon"><FileUp size={28} strokeWidth={1.4} /></span><h3>把 PDF 拖到这里</h3><p>支持一次选择或拖入多份 PDF 合并整理</p><button className="button upload-button" onClick={() => input.current?.click()}><Upload size={15} />选择 PDF 文件</button><small>支持多份 PDF 合并，总计最大 300 MB</small></div>}
           </div>
           <div className="file-assurance"><LockKeyhole size={13} /><span>文件留在你的浏览器中，不上传课件。</span><span className="assurance-right">原文件保持不变</span></div>
           <div className="section-divider" />
@@ -178,7 +224,7 @@ function App() {
             {advanced && <div className="advanced-panel"><div className="advanced-setting"><label htmlFor="source-mode">来源显示</label><select id="source-mode" value={options.sourceMode} onChange={e => setOptions({ ...options, sourceMode: e.target.value })}>{Object.entries(sourceNames).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select><small>默认保持正文干净，不添加原页码提示。</small></div><div className="advanced-setting"><label className="checkbox-label"><input type="checkbox" checked={partial} onChange={e => setPartial(e.target.checked)} />只整理部分页面</label><input className="range-input" disabled={!partial} placeholder={partial ? '例如：5-10, 18' : '默认整理全部页面'} value={partial ? options.pages : ''} aria-label="要整理的原 PDF 页码" onChange={e => setOptions({ ...options, pages: e.target.value })} /><small>按 PDF 文件从第一页开始计数。</small></div></div>}
             <div className="image-settings"><div className="option-label">图片清理<span>保留流程图、题图和文字截图</span></div><label className="checkbox-label"><input type="checkbox" checked={(options.imageMode ?? 'basic') === 'smart'} onChange={e => setOptions({ ...options, imageMode: e.target.checked ? 'smart' : 'basic', imageOverrides: undefined })} />本地视觉识别普通配图</label><p>可选。首次开启下载约 154 MB 模型，生成后可在“检查图片”中手动调整。</p>{(options.imageMode ?? 'basic') === 'smart' && <label className="model-source">模型下载源<select aria-label="模型下载源" value={options.modelHost || 'mirror'} onChange={e => setOptions({ ...options, modelHost: e.target.value as 'mirror' | 'official' })}><option value="mirror">国内镜像（HF Mirror）</option><option value="official">Hugging Face 官方</option></select></label>}</div>
           </fieldset>
-          {active ? <div className="processing-panel" role="status" aria-live="polite"><div className="processing-title"><span className="processing-symbol"><Sparkles size={20} /></span><div><strong>正在把知识连起来</strong><p>{job.message}</p></div><span className="progress-number">{job.progress}%</span></div><div className="progress-track"><i style={{ width: `${job.progress}%` }} /></div><div className="processing-bottom"><span>{[{ id: 'reading', name: '读取课件' }, { id: 'images', name: '识别图片' }, { id: 'organizing', name: '合并重复' }, { id: 'exporting', name: '生成讲义' }].map((s, i) => <span className={job.stage === s.id ? 'current-stage' : ''} key={s.id}>{i > 0 && <ChevronRight size={11} />}{s.name}</span>)}</span><button onClick={cancel}>取消整理</button></div></div> : completed ? <div className="result-panel"><div className="result-title"><span className="result-check"><Check size={21} /></span><div><h3>讲义整理好了，继续专注吧。</h3><p>{job.stats!.source_pages} 页课件，整理为 <strong>{job.stats!.result_pages} 页</strong>连贯讲义</p></div><span className="result-seal">READY TO READ</span></div><div className="result-details"><span><Check size={13} />合并 {job.stats!.removed_headings} 处重复标题</span><span><Check size={13} />合并 {job.stats!.removed_paragraphs} 处重复正文</span>{!!job.stats!.removed_signatures && <span><Check size={13} />清理 {job.stats!.removed_signatures} 处重复页脚署名</span>}{job.stats!.removed_images !== undefined && <span><Check size={13} />移除 {job.stats!.removed_images} 处图片</span>}{job.stats!.visual_images !== undefined && <span><ScanLine size={13} />{Object.keys(job.options.imageOverrides || {}).length ? '已按核对选择处理图片' : '本地模型识别 ' + job.stats!.visual_images + ' 张配图'}</span>}{job.stats!.image_pages > 0 && <span><ScanLine size={13} />{job.stats!.image_pages} 页图片内容已保留原图</span>}</div><div className="result-actions"><button className="button secondary" onClick={() => setImageReview(job)}>检查图片</button><button className="button secondary" onClick={() => setPreview(job)}><LayoutTemplate size={16} />对比预览</button><a className="button primary" href={job.downloadUrl} download={downloadName(job)}><ArrowDownToLine size={16} />下载复习讲义</a><button className="text-button restart" onClick={() => setJob(null)}>调整后重新整理</button></div></div> : <><div className="action-row"><span><CheckCheck size={16} />轻标题 · 连续正文 · 保留原文</span><button className="button primary start-button" disabled={!document || busy} onClick={start}>{requesting ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}开始整理<ArrowRight size={16} /></button></div>{job?.status === 'error' && <p className="inline-error" role="alert">{job.error}</p>}{job?.status === 'cancelled' && <p className="cancel-note">已取消。文件和选项仍在，可以随时重新开始。</p>}</>}
+          {active ? <div className="processing-panel" role="status" aria-live="polite"><div className="processing-title"><span className="processing-symbol"><Sparkles size={20} /></span><div><strong>正在把知识连起来</strong><p>{job.message}</p></div><span className="progress-number">{job.progress}%</span></div><div className="progress-track"><i style={{ width: `${job.progress}%` }} /></div><div className="processing-bottom"><span>{[{ id: 'reading', name: '读取课件' }, { id: 'images', name: '识别图片' }, { id: 'organizing', name: '合并重复' }, { id: 'exporting', name: '生成讲义' }].map((s, i) => <span className={job.stage === s.id ? 'current-stage' : ''} key={s.id}>{i > 0 && <ChevronRight size={11} />}{s.name}</span>)}</span><button onClick={cancel}>取消整理</button></div></div> : completed ? <div className="result-panel"><div className="result-title"><span className="result-check"><Check size={21} /></span><div><h3>讲义整理好了，继续专注吧。</h3><p>{job.stats!.source_pages} 页课件，整理为 <strong>{job.stats!.result_pages} 页</strong>连贯讲义</p></div><span className="result-seal">READY TO READ</span></div><div className="result-details"><span><Check size={13} />合并 {job.stats!.removed_headings} 处重复标题</span><span><Check size={13} />合并 {job.stats!.removed_paragraphs} 处重复正文</span>{!!job.stats!.removed_signatures && <span><Check size={13} />清理 {job.stats!.removed_signatures} 处重复页脚署名</span>}{job.stats!.removed_images !== undefined && <span><Check size={13} />移除 {job.stats!.removed_images} 处图片</span>}{job.stats!.visual_images !== undefined && <span><ScanLine size={13} />{Object.keys(job.options.imageOverrides || {}).length ? '已按核对选择处理图片' : '本地模型识别 ' + job.stats!.visual_images + ' 张配图'}</span>}{job.stats!.image_pages > 0 && <span><ScanLine size={13} />{job.stats!.image_pages} 页图片内容已保留原图</span>}</div><div className="result-actions"><button className="button secondary" onClick={() => setImageReview(job)}>检查图片</button><button className="button secondary" onClick={() => setPreview(job)}><LayoutTemplate size={16} />对比预览</button><a className="button primary" href={job.downloadUrl} download={downloadName(job)}><ArrowDownToLine size={16} />下载复习讲义</a><button className="text-button restart" onClick={() => setJob(null)}>调整后重新整理</button></div></div> : <><div className="action-row"><span><CheckCheck size={16} />轻标题 · 连续正文 · 保留原文</span><button className="button primary start-button" disabled={(!document && queue.length === 0) || busy} onClick={start}>{requesting ? <LoaderCircle size={16} className="spin" /> : <Sparkles size={16} />}{queue.length > 1 ? `合并并整理（${queue.length} 份）` : '开始整理'}<ArrowRight size={16} /></button></div>{job?.status === 'error' && <p className="inline-error" role="alert">{job.error}</p>}{job?.status === 'cancelled' && <p className="cancel-note">已取消。文件和选项仍在，可以随时重新开始。</p>}</>}
         </section>
         <section className="question-card" aria-label="题目助手"><span className="question-card-icon"><ClipboardCopy size={22} /></span><div><h2>课件里的题目，继续弄明白。</h2><p>读取或粘贴原题，一键复制解析提示词，带到你常用的 AI 中。</p></div><button className="button secondary small" onClick={() => void openQuestions()} disabled={busy}>打开题目助手<ArrowUpRight size={15} /></button></section>
         <section className="recent-section"><div className="recent-heading"><h2><Clock3 size={16} />最近整理</h2>{recent.length > 3 && <button className="text-button" onClick={() => setView('history')}>查看全部<ArrowRight size={14} /></button>}</div>{recent.length ? <div className="history-list compact-history">{recent.slice(0, 3).map(item => <button className="history-row" key={item.id} onClick={() => { if (item.status === 'complete') setPreview(item); else setView('history'); }}><FileText size={18} /><span className="history-text"><strong>{item.documentName}</strong><small>{item.stats ? `${item.stats.source_pages} 页 → ${item.stats.result_pages} 页` : item.message}</small></span><span className="history-open">{item.status === 'complete' ? '打开讲义' : '查看记录'}<ArrowUpRight size={14} /></span></button>)}</div> : <div className="recent-empty"><span>还没有整理记录。下一份清爽的讲义，就从这里开始。</span><BookOpen size={20} /></div>}</section>
