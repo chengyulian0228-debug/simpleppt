@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Structure, fingerprint, headingRank, selectPages } from '../src/structure.ts';
+import { Structure, clean, fingerprint, headingRank, selectPages } from '../src/structure.ts';
 test('progressive explanations reopen the matching topic while preserving exceptions', () => {
   const t = new Structure();
   for (const page of [1, 2]) {
@@ -25,4 +25,8 @@ test('English word boundaries, legal clauses and page selection stay conservativ
   assert.equal(headingRank('《民法典》第464条'), null);
   assert.deepEqual(selectPages('5-7，7, 81', 574), [5, 6, 7, 81]);
   for (const range of ['0', '4-2', '575', '5,']) assert.throws(() => selectPages(range, 574));
+});
+test('Wingdings/Symbol PUA bullets normalize to standard glyphs without altering text', () => {
+  assert.equal(clean('\uf0d8 单务合同无风险负担问题'), '▶ 单务合同无风险负担问题');
+  assert.equal(clean('\uf075 要点一 \uf070 要点二 \uf099 其他'), '◆ 要点一 ▪ 要点二 • 其他');
 });

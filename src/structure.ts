@@ -1,5 +1,9 @@
-// Only canonicalize compatibility ideographs for comparison/display; never paraphrase content.
-export const clean = (text: string) => text.replace(/[\u2e80-\u2fdf\uf900-\ufaff]/g, c => c === '⺠' ? '民' : c.normalize('NFKC')).trim();
+// Only canonicalize compatibility ideographs and Wingdings/Symbol PUA bullets; never paraphrase content.
+const puaBullets: Record<string, string> = { '\uf0d8': '▶', '\uf075': '◆', '\uf070': '▪', '\uf0a7': '▪', '\uf06e': '▪', '\uf0fc': '✓', '\uf0fe': '✓', '\uf0e0': '→', '\uf0f0': '→' };
+export const clean = (text: string) => text
+  .replace(/[\uf000-\uf0ff]/g, c => puaBullets[c] || '•')
+  .replace(/[\u2e80-\u2fdf\uf900-\ufaff]/g, c => c === '⺠' ? '民' : c.normalize('NFKC'))
+  .trim();
 export const fingerprint = (text: string) => clean(text).replace(/\s+/g, ' ').replace(/(?<=[\u3400-\u9fff])\s+(?=[\u3400-\u9fff])/g, '');
 export function selectPages(value: string, count: number): number[] {
   if (!value.trim()) return Array.from({ length: count }, (_, i) => i + 1);

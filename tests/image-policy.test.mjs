@@ -34,3 +34,10 @@ test('a tiny isolated corner badge is removed on a single text page, an uncertai
   assert.equal(decision([page(1, [image(1, { x: 900, right: 940, top: 10, bottom: 50 })], [body])])[0].remove, true);
   assert.equal(decision([page(1, [image(1, { x: 600, right: 900, top: 290, bottom: 490 })], [body])])[0].remove, false);
 });
+test('logos/banners repeating at the same position across 3+ pages are removed even if large or touching text', () => {
+  const logo = { x: 200, right: 800, top: 20, bottom: 140 };
+  const pages3 = [1, 2, 3].map(n => page(n, [image(n, logo)]));
+  assert.ok(decision(pages3).every(d => d.remove && d.reason === 'template'));
+  const caption = { text: '图1：课程框架', x: 200, right: 400, top: 145, bottom: 165 };
+  assert.ok(decision([1, 2, 3].map(n => page(n, [image(n, logo)], [caption]))).every(d => !d.remove));
+});

@@ -32,14 +32,17 @@ export function classifyImages(pages: ImagePage[]) {
       const nearby = page.rows.filter(row => gap(image, row) < page.height * .055);
       const caption = nearby.some(row => teaching.test(row.text));
       const overlap = page.rows.some(row => intersects(image, row));
-      // Scanned text, equations, annotated pictures and large screenshots must not be dropped.
-      if (image.mask || fraction > .85 || overlap || caption) return { image, remove: false, reason: 'content' };
-      const edge = image.bottom <= page.height * .19 || image.top >= page.height * .84
+      // Scanned text, equations and captioned figures must not be dropped.
+      if (image.mask || fraction > .85 || caption) return { image, remove: false, reason: 'content' };
+      const repeats = new Set(all.filter(other => other.page.number !== page.number && stable(image, page, other.image, other.page) && samePicture(image, other.image)).map(other => other.page.number)).size;
+      // Logos/banners repeating at the exact same position across >= 3 pages are template decoration even if large or touching headers.
+      if (repeats >= 2) return { image, remove: true, reason: 'template' };
+      if (overlap) return { image, remove: false, reason: 'content' };
+      const edge = image.bottom <= page.height * .22 || image.top >= page.height * .84
         || ((image.right <= page.width * .17 || image.x >= page.width * .83) && image.bottom - image.top <= page.height * .35);
       const promotional = nearby.some(row => promotion.test(row.text));
       const educational = page.rows.some(row => teaching.test(row.text));
       if (promotional && fraction < .18 && !educational) return { image, remove: true, reason: 'promotion' };
-      const repeats = new Set(all.filter(other => other.page.number !== page.number && stable(image, page, other.image, other.page) && samePicture(image, other.image)).map(other => other.page.number)).size;
       if (edge && fraction < .12 && repeats >= 1) return { image, remove: true, reason: 'template' };
       // A unique small corner badge is decoration only when substantial readable body text exists.
       const corner = (image.right <= page.width * .2 || image.x >= page.width * .8)

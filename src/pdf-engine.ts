@@ -49,10 +49,10 @@ export async function readQuestionPages(blob: Blob, range: string, signal: Abort
     return { text: texts.join('\n\n'), emptyPages };
   } finally { await pdf.destroy(); }
 }
-function canvasBlob(canvas: HTMLCanvasElement, type = 'image/png'): Promise<Blob> {
-  return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('页面图像生成失败')), type, .92));
+function canvasBlob(canvas: HTMLCanvasElement, type = 'image/png', quality = .92): Promise<Blob> {
+  return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('页面图像生成失败')), type, quality));
 }
-export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 1200, masks: FooterLine[] = [], omitted = new Set<number>()): Promise<Blob> {
+export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 1200, masks: FooterLine[] = [], omitted = new Set<number>(), type = 'image/png'): Promise<Blob> {
   const page = await pdf.getPage(number);
   const viewport = page.getViewport({ scale: Math.min(2, width / page.getViewport({ scale: 1 }).width) });
   const canvas = document.createElement('canvas');
@@ -73,7 +73,7 @@ export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 
     const background = [0, 1, 2].map(channel => samples.map(pixel => pixel[channel]).sort((a, b) => a - b)[2]);
     ctx.fillStyle = `rgb(${background.join(',')})`; ctx.fillRect(x, y, right - x, bottom - y);
   }
-  const blob = await canvasBlob(canvas);
+  const blob = await canvasBlob(canvas, type, type === 'image/jpeg' ? .85 : .92);
   canvas.width = canvas.height = 0;
   return blob;
 }
@@ -244,7 +244,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
             const id = imageKey(p.number, operation);
             const locked = group.some(g => g.mask) || (bounds.right - bounds.x) * (bounds.bottom - bounds.top) / (p.width * p.height) > .85;
             // Do not infer on protected diagrams, formula masks or entire scanned slides.
-            if ((options.imageMode ?? 'smart') === 'smart' && !locked && group.length === 1 && decisions.every(d => !d.remove && d.reason !== 'content') && options.imageOverrides?.[id] === undefined) {
+            if ((options.imageMode ?? 'basic') === 'smart' && !locked && group.length === 1 && decisions.every(d => !d.remove && d.reason !== 'content') && options.imageOverrides?.[id] === undefined) {
               const input = document.createElement('canvas'); input.width = input.height = 224;
               try {
                 const ctx = input.getContext('2d', { willReadFrequently: true })!;
@@ -322,7 +322,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
       if (raster) {
         const section = p.rows.find(r => r.bottom < p.height * .18 && headingRank(r.text) === 3);
         if (section) tree.heading(section.text, 3, p.number);
-        const image = new Uint8Array(await (await renderPage(pdf, p.number, 1800, footerMasks.get(p.number), omittedFor(p.number))).arrayBuffer());
+        const image = new Uint8Array(await (await renderPage(pdf, p.number, 1600, footerMasks.get(p.number), omittedFor(p.number), 'image/jpeg')).arrayBuffer());
         tree.block({ kind: 'image', runs: [], pages: [p.number], image, width: p.width, height: p.height }); imagePages++;
         preservedImages += Math.max(1, keptImages.length);
         (await pdf.getPage(p.number)).cleanup(); await pause(); continue;
@@ -346,7 +346,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
           crop.width = Math.max(1, Math.ceil((region.right - region.x) * scale)); crop.height = Math.max(1, Math.ceil((region.bottom - region.top) * scale));
           try {
             crop.getContext('2d')!.drawImage(pageBitmap, region.x * scale, region.top * scale, (region.right - region.x) * scale, (region.bottom - region.top) * scale, 0, 0, crop.width, crop.height);
-            tree.block({ kind: 'image', runs: [], pages: [p.number], image: new Uint8Array(await (await canvasBlob(crop)).arrayBuffer()), width: region.right - region.x, height: region.bottom - region.top });
+            tree.block({ kind: 'image', runs: [], pages: [p.number], image: new Uint8Array(await (await canvasBlob(crop, 'image/jpeg', .85)).arrayBuffer()), width: region.right - region.x, height: region.bottom - region.top });
             preservedImages++;
           } finally { crop.width = crop.height = 0; }
         }
@@ -360,7 +360,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
         let rank = headingRank(row.text);
         if (!rank && row.bottom < p.height * .15 && (frequency.get(fingerprint(row.text)) || 0) > 1 && row.text.length < 60) rank = corner ? 2 : 3;
         if (rank) { flush(); tree.heading(row.text, rank, p.number); continue; }
-        const starts = /^[•●▪]|^[（(]\d+[）)]|^[A-D][.．、]|^[【《]|^\d+[.．、]/.test(row.text);
+        const starts = /^[•●▪◆▶✓→]|^[（(]\d+[）)]|^[A-D][.．、]|^[【《]|^\d+[.．、]/.test(row.text);
         if (pending && !starts && row.top - pending.bottom < row.size * 1.1 && Math.abs(row.size - pending.size) < 2) {
           if (/[a-zA-Z0-9]$/.test(pending.runs.at(-1)!.text) && /^[a-zA-Z0-9]/.test(row.text)) pending.runs.push({ text: ' ' });
           pending.runs.push(...row.runs); pending.bottom = row.bottom;
@@ -467,7 +467,7 @@ async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: st
     for (const b of n.body) {
       check();
       if (b.kind === 'image' && b.image) {
-        const image = await out.embedPng(b.image);
+        const image = b.image[0] === 0xff && b.image[1] === 0xd8 ? await out.embedJpg(b.image) : await out.embedPng(b.image);
         let w = lineWidth, h = w * image.height / image.width;
         const max = H - 190; if (h > max) { w *= max / h; h = max; }
         need(h + 15); page.drawImage(image, { x: left, y: y - h, width: w, height: h }); y -= h + 12;
