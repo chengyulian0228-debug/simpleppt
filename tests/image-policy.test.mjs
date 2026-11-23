@@ -9,30 +9,32 @@ test('repeated footer branding and top badges are removed even with different im
   assert.ok(decision([page(1), page(2, [image(9)])]).every(d => d.remove && d.reason === 'template'));
   assert.ok(decision([page(1, [image(1, { top: 5, bottom: 65 })]), page(2, [image(2, { top: 5, bottom: 65 })])]).every(d => d.remove));
 });
-test('repeated diagrams in the body, scanned text, equation masks and overlaid labels remain', () => {
-  for (const extras of [{ x: 250, right: 650, top: 270, bottom: 440 }, { x: 0, right: 960, top: 0, bottom: 540 }, { mask: true }, { x: 100, right: 300, top: 190, bottom: 240 }]) {
+test('scanned text, equation masks and overlaid labels remain, while uncaptioned body photos are hidden by default', () => {
+  for (const extras of [{ x: 0, right: 960, top: 0, bottom: 540 }, { mask: true }, { x: 100, right: 300, top: 190, bottom: 240 }]) {
     assert.ok(decision([page(1, [image(1, extras)]), page(2, [image(2, extras)])]).every(d => !d.remove));
   }
+  const uncaptioned = { x: 250, right: 650, top: 270, bottom: 440 };
+  assert.ok(decision([page(1, [image(1, uncaptioned)])]).every(d => d.remove && d.reason === 'decorative'));
 });
-test('a caption protects a small repeated figure at the page edge', () => {
+test('a caption protects a figure even at the page edge', () => {
   const caption = { text: '图1：细胞结构示意', x: 830, right: 955, top: 430, bottom: 450 };
   assert.ok(decision([page(1, [image()], [caption]), page(2, [image()], [caption])]).every(d => !d.remove));
 });
-test('similar placement or blank samples alone do not establish repeated branding', () => {
-  assert.ok(decision([page(1), page(2, [image(1, { sample: sample(180) })])]).every(d => !d.remove));
-  assert.ok(decision([page(1, [image(1, { sample: undefined })]), page(2, [image(2, { sample: undefined })])]).every(d => !d.remove));
-  assert.ok(decision([page(1, [image(), image(2)])]).every(d => !d.remove));
+test('similar placement or blank samples alone do not establish repeated template branding', () => {
+  assert.ok(decision([page(1), page(2, [image(1, { sample: sample(180) })])]).every(d => d.reason !== 'template'));
+  assert.ok(decision([page(1, [image(1, { sample: undefined })]), page(2, [image(2, { sample: undefined })])]).every(d => d.reason !== 'template'));
+  assert.ok(decision([page(1, [image(), image(2)])]).every(d => d.reason !== 'template'));
 });
 test('promotional QR images can be removed, teaching examples of QR codes stay', () => {
   const promo = { text: '扫码关注公众号', x: 815, right: 955, top: 430, bottom: 450 };
   assert.equal(decision([page(1, [image()], [promo])])[0].reason, 'promotion');
   const teaching = { text: '图1 二维码结构示例', x: 60, right: 450, top: 100, bottom: 130 };
-  assert.equal(decision([page(1, [image()], [promo, teaching])])[0].remove, false);
+  assert.equal(decision([page(1, [image()], [promo, teaching])])[0].reason, 'decorative');
 });
-test('a tiny isolated corner badge is removed on a single text page, an uncertain body photo stays', () => {
+test('a tiny isolated corner badge is marked template, an uncaptioned body photo is marked decorative', () => {
   const body = { text: '这是一段包含独有教学内容的正文。'.repeat(10), x: 80, right: 750, top: 250, bottom: 280 };
-  assert.equal(decision([page(1, [image(1, { x: 900, right: 940, top: 10, bottom: 50 })], [body])])[0].remove, true);
-  assert.equal(decision([page(1, [image(1, { x: 600, right: 900, top: 290, bottom: 490 })], [body])])[0].remove, false);
+  assert.equal(decision([page(1, [image(1, { x: 900, right: 940, top: 10, bottom: 50 })], [body])])[0].reason, 'template');
+  assert.equal(decision([page(1, [image(1, { x: 600, right: 900, top: 290, bottom: 490 })], [body])])[0].reason, 'decorative');
 });
 test('logos/banners repeating at the same position across 3+ pages are removed even if large or touching text', () => {
   const logo = { x: 200, right: 800, top: 20, bottom: 140 };

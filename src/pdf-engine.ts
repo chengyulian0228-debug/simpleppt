@@ -52,7 +52,35 @@ export async function readQuestionPages(blob: Blob, range: string, signal: Abort
 function canvasBlob(canvas: HTMLCanvasElement, type = 'image/png', quality = .92): Promise<Blob> {
   return new Promise((resolve, reject) => canvas.toBlob(b => b ? resolve(b) : reject(new Error('页面图像生成失败')), type, quality));
 }
-export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 1200, masks: FooterLine[] = [], omitted = new Set<number>(), type = 'image/png'): Promise<Blob> {
+function trimCanvas(source: HTMLCanvasElement, pad = 12): HTMLCanvasElement {
+  const { width: w, height: h } = source;
+  if (w < 40 || h < 40) return source;
+  const ctx = source.getContext('2d', { willReadFrequently: true });
+  if (!ctx) return source;
+  const { data } = ctx.getImageData(0, 0, w, h);
+  const pixel = (x: number, y: number) => { const i = (y * w + x) * 4; return [data[i], data[i + 1], data[i + 2]]; };
+  const bg = pixel(2, h - 3);
+  const diff = (x: number, y: number) => {
+    const i = (y * w + x) * 4;
+    return Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 28;
+  };
+  let top = h, bottom = -1, left = w, right = -1;
+  for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
+    if (!diff(x, y)) continue;
+    if (y < top) top = y;
+    if (y > bottom) bottom = y;
+    if (x < left) left = x;
+    if (x > right) right = x;
+  }
+  if (bottom - top < 16 || right - left < 16) return source;
+  const x0 = Math.max(0, left - pad), y0 = Math.max(0, top - pad);
+  const cw = Math.min(w - x0, right - left + 1 + pad * 2), ch = Math.min(h - y0, bottom - top + 1 + pad * 2);
+  if (cw >= w * .96 && ch >= h * .96) return source;
+  const trimmed = document.createElement('canvas'); trimmed.width = cw; trimmed.height = ch;
+  trimmed.getContext('2d')!.drawImage(source, x0, y0, cw, ch, 0, 0, cw, ch);
+  return trimmed;
+}
+export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 1200, masks: FooterLine[] = [], omitted = new Set<number>(), type = 'image/png', trim = false): Promise<Blob> {
   const page = await pdf.getPage(number);
   const viewport = page.getViewport({ scale: Math.min(2, width / page.getViewport({ scale: 1 }).width) });
   const canvas = document.createElement('canvas');
@@ -73,7 +101,9 @@ export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 
     const background = [0, 1, 2].map(channel => samples.map(pixel => pixel[channel]).sort((a, b) => a - b)[2]);
     ctx.fillStyle = `rgb(${background.join(',')})`; ctx.fillRect(x, y, right - x, bottom - y);
   }
-  const blob = await canvasBlob(canvas, type, type === 'image/jpeg' ? .85 : .92);
+  const target = trim ? trimCanvas(canvas) : canvas;
+  const blob = await canvasBlob(target, type, type === 'image/jpeg' ? .85 : .92);
+  if (target !== canvas) target.width = target.height = 0;
   canvas.width = canvas.height = 0;
   return blob;
 }
@@ -244,7 +274,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
             const id = imageKey(p.number, operation);
             const locked = group.some(g => g.mask) || (bounds.right - bounds.x) * (bounds.bottom - bounds.top) / (p.width * p.height) > .85;
             // Do not infer on protected diagrams, formula masks or entire scanned slides.
-            if ((options.imageMode ?? 'basic') === 'smart' && !locked && group.length === 1 && decisions.every(d => !d.remove && d.reason !== 'content') && options.imageOverrides?.[id] === undefined) {
+            if ((options.imageMode ?? 'basic') === 'smart' && !locked && group.length === 1 && decisions.every(d => d.reason !== 'content' && d.reason !== 'template' && d.reason !== 'promotion') && options.imageOverrides?.[id] === undefined) {
               const input = document.createElement('canvas'); input.width = input.height = 224;
               try {
                 const ctx = input.getContext('2d', { willReadFrequently: true })!;
@@ -268,7 +298,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
     }
     report(47, 'organizing', '正在应用图片筛选结果');
     const imageDecisions = classifyImages(extracted);
-    const reasonNames = { content: '图注、图文叠加或整页内容，保留', template: '重复装饰', promotion: '推广配图', visual: '视觉模型判定为普通配图，建议核对', uncertain: '用途不确定，保留', manual: '按你的选择处理' };
+    const reasonNames = { content: '图注、图文叠加或整页内容，保留', template: '重复校徽或模板装饰', promotion: '推广配图', decorative: '非关键配图，已隐藏（可按需恢复）', visual: '视觉模型判定为普通配图，建议核对', uncertain: '用途不确定，保留', manual: '按你的选择处理' };
     for (const p of extracted) for (const d of imageDecisions.get(p.number) || []) {
       const id = imageKey(p.number, d.image.operation), review = images.find(image => image.id === id)!;
       if (options.imageOverrides?.[id] !== undefined && !review.locked) { d.remove = options.imageOverrides[id]; d.reason = 'manual'; }
@@ -322,7 +352,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
       if (raster) {
         const section = p.rows.find(r => r.bottom < p.height * .18 && headingRank(r.text) === 3);
         if (section) tree.heading(section.text, 3, p.number);
-        const image = new Uint8Array(await (await renderPage(pdf, p.number, 1600, footerMasks.get(p.number), omittedFor(p.number), 'image/jpeg')).arrayBuffer());
+        const image = new Uint8Array(await (await renderPage(pdf, p.number, 1600, footerMasks.get(p.number), omittedFor(p.number), 'image/jpeg', true)).arrayBuffer());
         tree.block({ kind: 'image', runs: [], pages: [p.number], image, width: p.width, height: p.height }); imagePages++;
         preservedImages += Math.max(1, keptImages.length);
         (await pdf.getPage(p.number)).cleanup(); await pause(); continue;
@@ -346,8 +376,11 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
           crop.width = Math.max(1, Math.ceil((region.right - region.x) * scale)); crop.height = Math.max(1, Math.ceil((region.bottom - region.top) * scale));
           try {
             crop.getContext('2d')!.drawImage(pageBitmap, region.x * scale, region.top * scale, (region.right - region.x) * scale, (region.bottom - region.top) * scale, 0, 0, crop.width, crop.height);
-            tree.block({ kind: 'image', runs: [], pages: [p.number], image: new Uint8Array(await (await canvasBlob(crop, 'image/jpeg', .85)).arrayBuffer()), width: region.right - region.x, height: region.bottom - region.top });
-            preservedImages++;
+            const trimmed = trimCanvas(crop, 8);
+            try {
+              tree.block({ kind: 'image', runs: [], pages: [p.number], image: new Uint8Array(await (await canvasBlob(trimmed, 'image/jpeg', .85)).arrayBuffer()), width: trimmed.width / scale, height: trimmed.height / scale });
+              preservedImages++;
+            } finally { if (trimmed !== crop) trimmed.width = trimmed.height = 0; }
           } finally { crop.width = crop.height = 0; }
         }
       };
@@ -452,26 +485,29 @@ async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: st
       y -= 15;
     }
   }
-  let visited = 0;
+  let visited = 0, hasBodyContent = false;
   async function visit(n: Topic, depth: number) {
     check();
     if (n.text) {
       if (n.rank <= 3) chapter = n.text;
-      const first = n.body[0];
-      const imageSpace = first?.kind === 'image' ? Math.min(H - 190, lineWidth * (first.height || 1) / (first.width || 1)) + leading * 3 : 0;
-      need(Math.max(leading * 3, imageSpace)); if (y < H - 90) y -= depth > 2 ? 5 : 10;
+      // Start a new page for major chapter headings (编/章) once previous content exists.
+      if (n.rank <= 2 && hasBodyContent && y < H - 140) newPage();
+      else { need(leading * 3.2); if (y < H - 90) y -= depth > 2 ? 4 : 8; }
       const mark = { text: n.text, page, y, depth, pages: [...n.pages].sort((a, b) => a - b) };
       bookmarks.push(mark); const entry = toc.find(t => t.text === n.text && !t.target); if (entry) entry.target = mark;
       paragraph([{ text: n.text }], depth <= 2 ? 12 : bodySize, depth <= 2 ? color : ink);
+      hasBodyContent = true;
     }
     for (const b of n.body) {
       check();
       if (b.kind === 'image' && b.image) {
         const image = b.image[0] === 0xff && b.image[1] === 0xd8 ? await out.embedJpg(b.image) : await out.embedPng(b.image);
-        let w = lineWidth, h = w * image.height / image.width;
-        const max = H - 190; if (h > max) { w *= max / h; h = max; }
-        need(h + 15); page.drawImage(image, { x: left, y: y - h, width: w, height: h }); y -= h + 12;
+        let w = Math.min(lineWidth, b.width ? Math.max(lineWidth * .55, b.width * .78) : lineWidth);
+        let h = w * image.height / image.width;
+        const max = H - 160; if (h > max) { w *= max / h; h = max; }
+        need(h + 12); page.drawImage(image, { x: left, y: y - h, width: w, height: h }); y -= h + 10;
       } else paragraph(b.runs);
+      hasBodyContent = true;
       if (options.sourceMode === 'inline') paragraph([{ text: `原 PDF 第 ${b.pages.join('、')} 页` }], 7.5, muted);
       if (++visited % 8 === 0) { report(86, 'exporting', `正在排版讲义第 ${out.getPageCount()} 页`); await pause(); }
     }

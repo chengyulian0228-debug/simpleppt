@@ -3,7 +3,7 @@ import { visualVerdict, type VisualEvidence } from './vision-policy.ts';
 export type Box = { x: number; right: number; top: number; bottom: number };
 export type ImageRegion = Box & { operation: number; sample?: Uint8Array; mask?: boolean; visual?: VisualEvidence };
 export type ImagePage = { number: number; width: number; height: number; rows: (Box & { text: string })[]; images: ImageRegion[] };
-export type ImageDecision = { image: ImageRegion; remove: boolean; reason: 'content' | 'template' | 'promotion' | 'visual' | 'manual' | 'uncertain' };
+export type ImageDecision = { image: ImageRegion; remove: boolean; reason: 'content' | 'template' | 'promotion' | 'decorative' | 'visual' | 'manual' | 'uncertain' };
 export const imageKey = (page: number, operation: number) => `${page}:${operation}`;
 export const intersects = (a: Box, b: Box) => Math.min(a.right, b.right) - Math.max(a.x, b.x) > 1 && Math.min(a.bottom, b.bottom) - Math.max(a.top, b.top) > 1;
 const area = (b: Box) => Math.max(0, b.right - b.x) * Math.max(0, b.bottom - b.top);
@@ -49,8 +49,13 @@ export function classifyImages(pages: ImagePage[]) {
         && (image.bottom <= page.height * .15 || image.top >= page.height * .9);
       const bodyText = page.rows.filter(row => row.top > page.height * .2 && row.bottom < page.height * .85).map(row => row.text).join('');
       if (corner && fraction < .008 && bodyText.length > 100) return { image, remove: true, reason: 'template' };
-      if (image.visual && visualVerdict(image.visual).remove) return { image, remove: true, reason: 'visual' };
-      return { image, remove: false, reason: 'uncertain' };
+      if (image.visual) {
+        const verdict = visualVerdict(image.visual);
+        if (verdict.remove) return { image, remove: true, reason: 'visual' };
+        return { image, remove: false, reason: 'uncertain' };
+      }
+      // Concise default: hide uncaptioned standalone body illustrations; users can restore any image in Image Review.
+      return { image, remove: true, reason: 'decorative' };
     });
     // PDF.js can paint several images in one operation. Never suppress a whole group if one must remain.
     for (const decision of decisions) if (decision.remove && decisions.some(other => other.image.operation === decision.image.operation && !other.remove)) {
