@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { classifyImages, isLowTextOverlayPage } from '../src/image-policy.ts';
+import { classifyImages, countBodyChars } from '../src/image-policy.ts';
 const sample = n => new Uint8Array(192).fill(n);
 const image = (operation = 1, extras = {}) => ({ operation, x: 860, right: 940, top: 460, bottom: 520, sample: sample(50), ...extras });
 const page = (number, images = [image()], rows = []) => ({ number, width: 960, height: 540, images, rows: [{ text: '第一章 课程知识', x: 80, right: 400, top: 20, bottom: 50 }, { text: '正文独有信息和条件须完整保留。', x: 80, right: 700, top: 200, bottom: 230 }, ...rows] });
@@ -43,14 +43,19 @@ test('logos/banners repeating at the same position across 3+ pages are removed e
   const caption = { text: '图1：课程框架', x: 200, right: 400, top: 145, bottom: 165 };
   assert.ok(decision([1, 2, 3].map(n => page(n, [image(n, logo)], [caption]))).every(d => !d.remove));
 });
-test('low-text image-overlay slides (covers/dividers) are dropped unless they contain diagram keywords or body text', () => {
-  const bg = image(1, { x: 0, right: 960, top: 0, bottom: 540 });
-  const cover = { number: 1, width: 960, height: 540, images: [bg], rows: [{ text: '第一章 合同法导论', x: 100, right: 400, top: 200, bottom: 260 }] };
-  assert.equal(isLowTextOverlayPage(cover, [bg]), true);
-  const framework = { ...cover, rows: [{ text: '债法课程基本框架', x: 100, right: 400, top: 200, bottom: 260 }] };
-  assert.equal(isLowTextOverlayPage(framework, [bg]), false);
-  const dense = { ...cover, rows: [{ text: '这是一段包含超过三十个字的完整正文说明内容，用于验证有实质正文时不会被当成过渡页删除。', x: 100, right: 700, top: 200, bottom: 260 }] };
-  assert.equal(isLowTextOverlayPage(dense, [bg]), false);
-  const scan = { ...cover, rows: [] };
-  assert.equal(isLowTextOverlayPage(scan, [bg]), false);
+test('repeating full-page slide master backgrounds (3+ pages) are removed as templates', () => {
+  const fullBg = { x: 0, right: 960, top: 0, bottom: 540 };
+  const pages3 = [1, 2, 3].map(n => page(n, [image(n, fullBg)]));
+  assert.ok(decision(pages3).every(d => d.remove && d.reason === 'template'));
+});
+test('countBodyChars excludes headings and footer page numbers when filtering pages with < 40 body chars', () => {
+  const samplePage = {
+    number: 1, width: 960, height: 540, images: [],
+    rows: [
+      { text: '第一章 合同法导论', x: 80, right: 400, top: 30, bottom: 60 },
+      { text: '只有十几个字的简短过渡说明', x: 80, right: 400, top: 200, bottom: 230 },
+      { text: '12', x: 900, right: 930, top: 515, bottom: 535 },
+    ],
+  };
+  assert.equal(countBodyChars(samplePage, r => r.text.startsWith('第一章')), 13);
 });

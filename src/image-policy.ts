@@ -9,12 +9,14 @@ export const intersects = (a: Box, b: Box) => Math.min(a.right, b.right) - Math.
 const area = (b: Box) => Math.max(0, b.right - b.x) * Math.max(0, b.bottom - b.top);
 const gap = (a: Box, b: Box) => Math.hypot(Math.max(0, a.x - b.right, b.x - a.right), Math.max(0, a.top - b.bottom, b.top - a.bottom));
 const teaching = /(?:图\s*[0-9一二三四五六七八九十]|表\s*[0-9一二三四五六七八九十]|如图|下图|上图|示意|流程图|流程|结构图|结构|框架|纲要|表格|对比|比较|关系图|坐标|曲线|电路|实验|显微|影像|病例|题图|看图|读图|识图|二维码的|二维码结构|编码原理|figure\s*\d|diagram|chart)/i;
-export function isLowTextOverlayPage(page: ImagePage, keptImages: ImageRegion[]): boolean {
-  if (!keptImages.length || keptImages.some(image => image.mask)) return false;
-  if (!keptImages.some(image => page.rows.some(row => intersects(image, row)))) return false;
-  const text = page.rows.map(r => r.text).join('').replace(/\s+/g, '');
-  if (!text.length || text.length >= 30) return false;
-  return !teaching.test(text);
+export function countBodyChars(page: ImagePage, isHeadingRow: (row: Box & { text: string }) => boolean): number {
+  let total = 0;
+  for (const row of page.rows) {
+    if (/^\d+$/.test(row.text.trim()) && row.top > page.height * .94) continue;
+    if (isHeadingRow(row)) continue;
+    total += row.text.replace(/\s+/g, '').length;
+  }
+  return total;
 }
 const promotion = /(?:扫码(?:关注|添加|咨询|领取|加群)|扫描.{0,8}(?:关注|领取|加群)|关注.{0,8}(?:公众号|视频号)|添加.{0,6}(?:微信|老师)|微信(?:号|咨询)|课程咨询|商务合作|领取资料|加入.{0,4}群|公众号[：:]|版权所有|\bcopyright\b|[©®™])/i;
 function samePicture(a: ImageRegion, b: ImageRegion) {
@@ -39,12 +41,12 @@ export function classifyImages(pages: ImagePage[]) {
       const nearby = page.rows.filter(row => gap(image, row) < page.height * .055);
       const caption = nearby.some(row => teaching.test(row.text));
       const overlap = page.rows.some(row => intersects(image, row));
-      // Scanned text, equations and captioned figures must not be dropped.
-      if (image.mask || fraction > .85 || caption) return { image, remove: false, reason: 'content' };
+      // Formula masks and explicitly captioned figures must not be dropped.
+      if (image.mask || caption) return { image, remove: false, reason: 'content' };
       const repeats = new Set(all.filter(other => other.page.number !== page.number && stable(image, page, other.image, other.page) && samePicture(image, other.image)).map(other => other.page.number)).size;
-      // Logos/banners repeating at the exact same position across >= 3 pages are template decoration even if large or touching headers.
+      // Slide master backgrounds, logos and banners repeating at the exact same position across >= 3 pages are template decoration.
       if (repeats >= 2) return { image, remove: true, reason: 'template' };
-      if (overlap) return { image, remove: false, reason: 'content' };
+      if (fraction > .85 || overlap) return { image, remove: false, reason: 'content' };
       const edge = image.bottom <= page.height * .22 || image.top >= page.height * .84
         || ((image.right <= page.width * .17 || image.x >= page.width * .83) && image.bottom - image.top <= page.height * .35);
       const promotional = nearby.some(row => promotion.test(row.text));

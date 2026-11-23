@@ -7,7 +7,7 @@ import { clean, fingerprint, headingRank, selectPages, Structure, type Run, type
 import type { Options, Job, SavedImageReview } from './types';
 import { questionPageText } from './question-tools';
 import { repeatedFooterSignatures, type FooterLine } from './footer-signatures';
-import { classifyImages, intersects, imageKey, isLowTextOverlayPage, type ImageRegion, type Box } from './image-policy';
+import { classifyImages, countBodyChars, intersects, imageKey, type ImageRegion, type Box } from './image-policy';
 import { inspectVisual, closeVision } from './vision-client';
 import { visualVerdict } from './vision-policy';
 
@@ -64,20 +64,18 @@ function trimCanvas(source: HTMLCanvasElement, pad = 12): HTMLCanvasElement {
     const i = (y * w + x) * 4;
     return Math.abs(data[i] - bg[0]) + Math.abs(data[i + 1] - bg[1]) + Math.abs(data[i + 2] - bg[2]) > 28;
   };
-  let top = h, bottom = -1, left = w, right = -1;
+  let top = h, bottom = -1;
   for (let y = 0; y < h; y += 2) for (let x = 0; x < w; x += 2) {
     if (!diff(x, y)) continue;
     if (y < top) top = y;
     if (y > bottom) bottom = y;
-    if (x < left) left = x;
-    if (x > right) right = x;
   }
-  if (bottom - top < 16 || right - left < 16) return source;
-  const x0 = Math.max(0, left - pad), y0 = Math.max(0, top - pad);
-  const cw = Math.min(w - x0, right - left + 1 + pad * 2), ch = Math.min(h - y0, bottom - top + 1 + pad * 2);
-  if (cw >= w * .96 && ch >= h * .96) return source;
-  const trimmed = document.createElement('canvas'); trimmed.width = cw; trimmed.height = ch;
-  trimmed.getContext('2d')!.drawImage(source, x0, y0, cw, ch, 0, 0, cw, ch);
+  if (bottom - top < 16) return source;
+  const y0 = Math.max(0, top - pad);
+  const ch = Math.min(h - y0, bottom - top + 1 + pad * 2);
+  if (ch >= h * .95) return source;
+  const trimmed = document.createElement('canvas'); trimmed.width = w; trimmed.height = ch;
+  trimmed.getContext('2d')!.drawImage(source, 0, y0, w, ch, 0, 0, w, ch);
   return trimmed;
 }
 export async function renderPage(pdf: PDFDocumentProxy, number: number, width = 1200, masks: FooterLine[] = [], omitted = new Set<number>(), type = 'image/png', trim = false): Promise<Blob> {
@@ -317,15 +315,17 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
     const tree = new Structure(); let imagePages = 0, preservedImages = 0;
     let accent = extracted.find(p => p.accent)?.accent || [.65, .23, .2];
     if (options.background === 'text-only') accent = [.27, .27, .27];
+    const isHeadingRow = (p: Extracted, row: Row) =>
+      headingRank(row.text) !== null || (row.bottom < p.height * .15 && (frequency.get(fingerprint(row.text)) || 0) > 1 && row.text.length < 60);
     for (const [i, p] of extracted.entries()) {
       check(); report(Math.round(48 + 31 * i / extracted.length), 'organizing', `正在衔接第 ${i + 1} / ${selected.length} 页正文`);
       const keptImages = (imageDecisions.get(p.number) || []).filter(d => !d.remove).map(d => d.image);
       const manuallyKept = keptImages.some(img => options.imageOverrides?.[imageKey(p.number, img.operation)] === false);
-      if (!manuallyKept && isLowTextOverlayPage(p, keptImages)) {
+      if (!manuallyKept && countBodyChars(p, row => isHeadingRow(p, row as Row)) < 40) {
         removedImages += keptImages.length;
         for (const img of keptImages) {
           const review = images.find(item => item.id === imageKey(p.number, img.operation));
-          if (review) { review.removed = true; review.locked = false; review.reason = '图文叠加且正文较少，已跳过此页'; }
+          if (review) { review.removed = true; review.locked = false; review.reason = '除标题外正文少于 40 字，已跳过此页'; }
         }
         (await pdf.getPage(p.number)).cleanup(); await pause(); continue;
       }
@@ -472,20 +472,18 @@ async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: st
     check();
     if (n.text) {
       if (n.rank <= 3) chapter = n.text;
-      // Start a new page for major chapter headings (编/章) once previous content exists.
-      if (n.rank <= 2 && hasBodyContent && y < H - 140) newPage();
+      // Start a new page for major chapter headings (编/章) only after previous body content exists.
+      if (n.rank <= 2 && hasBodyContent && y < H - 140) { newPage(); hasBodyContent = false; }
       else { need(leading * 3.2); if (y < H - 90) y -= depth > 2 ? 4 : 8; }
       const mark = { text: n.text, page, y, depth, pages: [...n.pages].sort((a, b) => a - b) };
       bookmarks.push(mark); const entry = toc.find(t => t.text === n.text && !t.target); if (entry) entry.target = mark;
       paragraph([{ text: n.text }], depth <= 2 ? 12 : bodySize, depth <= 2 ? color : ink);
-      hasBodyContent = true;
     }
     for (const b of n.body) {
       check();
       if (b.kind === 'image' && b.image) {
         const image = b.image[0] === 0xff && b.image[1] === 0xd8 ? await out.embedJpg(b.image) : await out.embedPng(b.image);
-        let w = Math.min(lineWidth, b.width ? Math.max(lineWidth * .55, b.width * .78) : lineWidth);
-        let h = w * image.height / image.width;
+        let w = lineWidth, h = w * image.height / image.width;
         const max = H - 160; if (h > max) { w *= max / h; h = max; }
         need(h + 12); page.drawImage(image, { x: left, y: y - h, width: w, height: h }); y -= h + 10;
       } else paragraph(b.runs);
