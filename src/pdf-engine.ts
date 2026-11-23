@@ -317,31 +317,6 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
     const tree = new Structure(); let imagePages = 0, preservedImages = 0;
     let accent = extracted.find(p => p.accent)?.accent || [.65, .23, .2];
     if (options.background === 'text-only') accent = [.27, .27, .27];
-    let banner: Uint8Array | undefined;
-    if (options.background === 'source-full') {
-      const p = extracted.find(p => p.rows.some(r => r.top < p.height * .14)) || extracted[0];
-      const img = await createImageBitmap(await renderPage(pdf, p.number, 1400, footerMasks.get(p.number), omittedFor(p.number)));
-      const canvas = document.createElement('canvas'); canvas.width = img.width; canvas.height = Math.round(img.height * .155);
-      const ctx = canvas.getContext('2d')!; ctx.drawImage(img, 0, 0);
-      const scale = img.width / p.width;
-      const bandX = Math.round(img.width * .26), bandW = Math.round(img.width * .43);
-      const pixels = ctx.getImageData(bandX, 0, bandW, canvas.height).data;
-      let ruleTop = canvas.height - 2;
-      for (let y = Math.round(img.height * .08); y < canvas.height; y++) {
-        let colored = 0;
-        for (let x = 0; x < bandW; x++) {
-          const k = (y * bandW + x) * 4;
-          if (pixels[k] > 75 && pixels[k] > pixels[k + 1] * 1.6 && pixels[k] > pixels[k + 2] * 1.4) colored++;
-        }
-        if (colored > bandW * .7) { ruleTop = y; break; }
-      }
-      for (const r of p.rows) if (r.bottom < p.height * .14 && r.x > p.width * .2 && r.right < p.width * .77) {
-        const pixel = ctx.getImageData(Math.max(0, Math.round(r.x * scale)), 2, 1, 1).data;
-        ctx.fillStyle = `rgb(${pixel[0]},${pixel[1]},${pixel[2]})`;
-        ctx.fillRect(r.x * scale - 2, 0, (r.right - r.x) * scale + 4, Math.max(0, ruleTop - 2));
-      }
-      banner = new Uint8Array(await (await canvasBlob(canvas)).arrayBuffer()); img.close(); canvas.width = canvas.height = 0;
-    }
     for (const [i, p] of extracted.entries()) {
       check(); report(Math.round(48 + 31 * i / extracted.length), 'organizing', `正在衔接第 ${i + 1} / ${selected.length} 页正文`);
       const keptImages = (imageDecisions.get(p.number) || []).filter(d => !d.remove).map(d => d.image);
@@ -404,7 +379,7 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
       (await pdf.getPage(p.number)).cleanup(); await pause();
     }
     report(81, 'exporting', '正在排版可搜索、可批注的讲义');
-    await layoutPdf(out, font, tree.root, title, options, accent, banner, check, report);
+    await layoutPdf(out, font, tree.root, title, options, accent, check, report);
     check(); report(96, 'exporting', '正在封装 PDF 与章节书签'); await pause();
     const output = await out.save(); check();
     return { blob: new Blob([output as Uint8Array<ArrayBuffer>], { type: 'application/pdf' }), images, stats: { source_pages: selected.length, result_pages: out.getPageCount(),
@@ -412,21 +387,19 @@ export async function simplify(blob: Blob, title: string, options: Options, sign
   } finally { closeVision(); await pdf.destroy(); }
 }
 
-async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: string, options: Options, accent: number[], bannerBytes: Uint8Array | undefined,
+async function layoutPdf(out: PDFDocument, font: PDFFont, root: Topic, title: string, options: Options, accent: number[],
   check: () => void, report: (p: number, s: string, m: string) => void) {
   const W = 595.28, H = 841.89, left = 48, right = options.layout === 'notes' ? 150 : 48;
   const bodySize = options.layout === 'compact' ? 10.5 : 11.5, leading = bodySize * 1.7, lineWidth = W - left - right;
   const ink = rgb(.18, .18, .17), muted = rgb(.54, .53, .5), color = rgb(accent[0], accent[1], accent[2]);
-  const banner = bannerBytes ? await out.embedPng(bannerBytes) : undefined;
   let page!: PDFPage, y = 0, chapter = title;
   const charset = new Set(font.getCharacterSet());
   const safe = (s: string) => [...s].filter(c => charset.has(c.codePointAt(0)!)).join('');
   function trim(s: string, max: number, size: number) { let value = safe(s); while (value && font.widthOfTextAtSize(value, size) > max) value = value.slice(0, -1); return value; }
   function newPage() {
-    page = out.addPage([W, H]); y = H - (banner ? 83 : 66);
-    if (banner) page.drawImage(banner, { x: 0, y: H - 48, width: W, height: 48 });
-    else if (options.background !== 'text-only') page.drawLine({ start: { x: left, y: H - 34 }, end: { x: W - 48, y: H - 34 }, color, thickness: .8 });
-    page.drawText(trim(chapter, W - 100, 8), { x: left, y: H - (banner ? 65 : 49), size: 8, font, color: muted });
+    page = out.addPage([W, H]); y = H - 66;
+    if (options.background !== 'text-only') page.drawLine({ start: { x: left, y: H - 34 }, end: { x: W - 48, y: H - 34 }, color, thickness: .8 });
+    page.drawText(trim(chapter, W - 100, 8), { x: left, y: H - 49, size: 8, font, color: muted });
     page.drawText(String(out.getPageCount()), { x: W - 55, y: 27, size: 8, font, color: muted });
     if (options.layout === 'notes') page.drawLine({ start: { x: W - right + 25, y: 50 }, end: { x: W - right + 25, y: H - 90 }, color: rgb(.9, .89, .87), thickness: .4 });
   }

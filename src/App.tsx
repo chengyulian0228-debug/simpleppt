@@ -6,7 +6,7 @@ import QuestionHelper from './QuestionHelper';
 import ImageReview from './ImageReview';
 const defaults: Options = { layout: 'balanced', background: 'source-frame', sourceMode: 'none', pages: '', imageMode: 'basic', modelHost: 'mirror' };
 const layouts = [{ id: 'balanced', name: '均衡阅读', detail: '舒适字号，适度留白' }, { id: 'compact', name: '紧凑复习', detail: '内容更集中，少翻几页' }, { id: 'notes', name: '留白批注', detail: '右侧留出手写空间' }];
-const backgrounds = [{ id: 'source-frame', name: '保留主风格', detail: '沿用主色，精简装饰' }, { id: 'source-full', name: '保留原页眉', detail: '沿用页眉，清理重复装饰' }, { id: 'text-only', name: '纯净正文', detail: '专注文字，去掉装饰' }];
+const backgrounds = [{ id: 'source-frame', name: '保留主风格', detail: '沿用主色，精简装饰' }, { id: 'text-only', name: '纯净正文', detail: '专注文字，去掉装饰' }];
 const sourceNames: Record<string, string> = { none: '不显示来源', bookmarks: '仅在书签中显示', appendix: '放在文末对照表', inline: '在正文旁显示' };
 const sizeLabel = (n: number) => n > 1024 * 1024 ? `${(n / 1024 / 1024).toFixed(1)} MB` : `${Math.max(1, Math.round(n / 1024))} KB`;
 
